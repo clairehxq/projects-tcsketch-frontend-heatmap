@@ -1,0 +1,867 @@
+// Create WebSocket connection.
+// const socket = new WebSocket('ws://xh895-01.cusp.nyu.edu:443/ws');
+const socket = new WebSocket('ws://localhost:8080/ws');
+var wordcloud;
+var rectangleWidth;
+var rectangleHeight;
+// var sendTime;
+var isDrawn = false;
+var zoom = 12;
+var userId;
+var g;
+var tagCloud;
+var brushArea;
+var minTime, maxTime;
+const maxSize = 36;
+
+var ID = function() {
+  // Gets a random integer between 0 - 100
+  return Math.floor(Math.random() * Math.floor(100));
+};
+
+socket.onopen = function(event) {
+  // socket.send("1A37F239BC1");
+  userId = ID();
+};
+
+// Listen for messages
+socket.onmessage = function(event) {
+  var data = JSON.parse(event.data);
+  // set to data variable to update the tag cloud
+  wordcloud = data.top.map(function(d) {
+    return {
+      text: d[0],
+      value: d[1],
+    }
+  });
+
+  // update the tag cloud
+  tagCloud = wordCloud(g);
+  tagCloud.update(wordcloud, [rectangleWidth, rectangleHeight]);
+
+  // update the bar chart
+  updateChart(wordcloud);
+};
+
+initParams();
+initTimeSeries();
+initChart();
+
+// Initialize the map
+var map = L.map('map', {
+  center: [40.75, -73.98],
+  zoom: 12,
+  zoomSnap: 0.25,
+  layers: [
+    L.tileLayer('https://api.tiles.mapbox.com/v4/{id}/{z}/{x}/{y}.png?access_token={accessToken}', {
+      attribution: 'Map data &copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors, <a href="https://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, Imagery © <a href="https://www.mapbox.com/">Mapbox</a>',
+      maxZoom: 18,
+      id: 'mapbox.light',
+      accessToken: 'pk.eyJ1IjoidW5pc3NlY2h1YSIsImEiOiJjank1a3RhMWYwN3dtM21xbnpocHByeXRyIn0.zL8d1xW1JjlP6cnJ3KdOTQ',
+    }),
+  ],
+});
+
+var drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
+
+var options = {
+  shapeOptions: {
+    showArea: true,
+    clickable: true,
+  },
+  draw: {
+    polygon: false,
+    polyline: false,
+    circle: false,
+    marker: false,
+    circlemarker: false,
+  },
+  metric: true,
+  edit: false,
+};
+
+var drawControl = new L.Control.Draw(options);
+
+drawControl.setDrawingOptions({
+  rectangle: {
+    shapeOptions: {
+      color: '#57068C',
+      weight: 3,
+      fill: false,
+      opacity: 0.85,
+    }
+  }
+});
+
+map.addControl(drawControl);
+
+var drawControlEditOnly = new L.Control.Draw({
+  edit: {
+    featureGroup: drawnItems,
+    selectedPathOptions: {
+      maintainColor: true
+    },
+  },
+  draw: false,
+});
+
+// Create the svg
+var svg = d3.select(map.getPanes().overlayPane).append("svg");
+// initial SVG setup: it should be exactly on top of the map (same size and position)
+svg.attr("width", $("#map").width())
+  .attr("height", $("#map").height())
+  .style("left", "0px")
+  .style("top", "0px");
+
+// Add the g for the word cloud
+g = svg.append("g").attr("class", "leaflet-zoom-hide");
+
+// Once the rectangle's created, send the parameters to the websocket
+map.on('draw:created', function(e) {
+  var type = e.layerType,
+    layer = e.layer;
+
+  drawnItems.addLayer(layer);
+  map.removeControl(drawControl); // Remove the draw control from the map to stop people from drawing
+  map.addControl(drawControlEditOnly); // Add edit only mode
+
+  updateQuery(layer);
+  isDrawn = true;
+});
+
+map.on(L.Draw.Event.EDITMOVE, function (e) {
+  layer = e.layer;
+  var { _southWest, _northEast } = layer._bounds;
+
+  // Make the tag cloud move as the rectangle is dragged
+  moveSVG(layer, _northEast, _southWest);
+  // updateQuery(layer);
+});
+// map.on(L.Draw.Event.EDITRESIZE, function (e) {
+//   layer = e.layer;
+//   var { _southWest, _northEast } = layer._bounds;
+//
+//   updateQuery(layer);
+// });
+
+// Handling when rectangle is edited
+map.on('draw:edited', function(e) {
+  var layers = e.layers;
+  layers.eachLayer(function(layer) {
+    updateQuery(layer);
+  });
+});
+
+map.on('draw:deleted', function(e) {
+  // Call the update
+  tagCloud = wordCloud(g);
+  tagCloud.update([], [0, 0]);
+
+  map.removeControl(drawControlEditOnly); // Remove the edit only mode
+  map.addControl(drawControl); // Add draw only mode
+  isDrawn = false;
+});
+
+function moveSVG(layer, _northEast, _southWest) {
+  // Gets the width, height and centroid of the drawn rectangle
+  rectangleWidth = Math.abs(map.latLngToLayerPoint(_northEast).x - map.latLngToLayerPoint(_southWest).x);
+  rectangleHeight = Math.abs(map.latLngToLayerPoint(_northEast).y - map.latLngToLayerPoint(_southWest).y);
+  var word_center = map.latLngToContainerPoint(layer.getBounds().getCenter());
+
+  var zoom_level;
+  zoom_level = Math.pow(2, (map.getZoom() - zoom));
+
+  // if (isDrawn) {
+  //   zoom_level = Math.pow(2, (map.getZoom() - zoom));
+  // } else {
+  //   zoom_level = 1;
+  //   zoom = Math.round(map.getZoom(), 0)
+  // }
+
+  // Move according to the edit
+  var ctopleft = map.containerPointToLatLng(L.point(0, 0));
+  var ltopleft = map.latLngToLayerPoint(ctopleft);
+  // the SVG moves when the user pans, so put it back to being exactly on top of the map
+  svg.style("left", ltopleft.x + "px")
+    .style("top", ltopleft.y + "px");
+
+  // g.attr("transform", "translate(" + (word_center.x / zoom_level) + "," + (word_center.y / zoom_level) + ")");
+  g.attr("transform", "translate(" + (word_center.x) + "," + (word_center.y) + ")");
+}
+
+function resetSVG() {
+  // Scales the svg according to the zoom_level
+  drawnItems.eachLayer(function(layer) {
+    var {
+      _southWest,
+      _northEast
+    } = layer._bounds;
+
+    moveSVG(layer, _northEast, _southWest);
+  });
+}
+
+function updateSVGZoom() {
+  // Scales the svg according to the zoom_level
+  drawnItems.eachLayer(function(layer) {
+    var {
+      _southWest,
+      _northEast
+    } = layer._bounds;
+
+    moveSVG(layer, _northEast, _southWest);
+
+    if (rectangleWidth / maxSize )
+
+    // update the tag cloud
+    tagCloud.update(wordcloud, [rectangleWidth, rectangleHeight]);
+  });
+}
+
+map.on('zoomend', updateSVGZoom);
+
+map.on('moveend', resetSVG);
+
+function initParams() {
+  k = document.querySelector('#k');
+  // Set the date
+  // minDate.value = date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString().padStart(2, 0) +
+  //   '-' + date.getDate().toString().padStart(2, 0);
+  k.value = 20;
+
+  // var minDate = document.querySelector('#minDate');
+  // var date = new Date();
+  // // Set the date
+  // // minDate.value = date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString().padStart(2, 0) +
+  // //   '-' + date.getDate().toString().padStart(2, 0);
+  // minDate.value = '2014-04-01';
+  //
+  // var maxDate = document.querySelector('#maxDate');
+  // // Set the date
+  // // maxDate.value = date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString().padStart(2, 0) +
+  // //   '-' + (date.getDate() + 10).toString().padStart(2, 0);
+  // maxDate.value = '2014-04-10';
+}
+
+function initTimeSeries() {
+  var ts_width = $("#ts").width(),
+    ts_height = $("#ts").height();
+
+  var margin = {top: 10, right: 30, bottom: 30, left: 60},
+    width = ts_width - margin.left - margin.right,
+    height = ts_height - margin.top - margin.bottom;
+
+  var tweetcounts = tsdata.sort(function(a, b) { return d3.ascending(new Date(a.date), new Date(b.date)); });
+  tweetcounts = tweetcounts.filter(function(d) {
+    return new Date(d.date).getTime() >= new Date(2019, 0, 1).getTime();
+  });
+  minTime = d3.min(tweetcounts, function(d) { return new Date(d.date); });
+  maxTime = d3.max(tweetcounts, function(d) { return new Date(d.date); });
+
+  d3.select("#minTime").html(moment(minTime).format('MMM DD, YYYY HH:mm'));
+  d3.select("#maxTime").html(moment(maxTime).format('MMM DD, YYYY HH:mm'));
+
+  // Initialize the scales
+  xScale = d3.scaleUtc()
+                .domain([d3.min(tweetcounts,
+                          function(d) { return new Date(d.date); }),
+                        d3.max(tweetcounts,
+                          function(d) { return new Date(d.date); })])
+                .range([0, width]);
+  var yScale = d3.scaleLinear()
+                .domain([d3.min(tweetcounts,
+                          function(d) { return d.count; }),
+                        d3.max(tweetcounts,
+                          function(d) { return d.count; })])
+                .range([height, 0]);
+
+  var line = d3.line()
+      .x(function(d) { return xScale(new Date(d.date)); }) // set the x values for the line generator
+      .y(function(d) { return yScale(d.count); }) // set the y values for the line generator
+      .curve(d3.curveMonotoneX); // apply smoothing to the line
+
+  areaGenerator = d3.area()
+      .curve(d3.curveMonotoneX)
+      .x(function(d) { return xScale(new Date(d.date)); })
+      .y0(yScale(0))
+      .y1(function(d) { return yScale(d.count) });
+
+  // Initialize the axis objects
+  xAxis = d3.axisBottom(xScale)
+      .ticks(10)
+      .tickSizeOuter(0);
+
+  yAxis = d3.axisLeft(yScale)
+      .ticks(4)
+      .tickSizeOuter(0);
+
+  // Setup the tsSVG
+  tsSVG = d3.select("#ts")
+    .append("svg")
+      .attr("width", ts_width)
+      .attr("height", ts_height)
+    .append("g")
+      .attr("transform",
+            "translate(" + margin.left + "," + margin.top + ")");
+
+  // Add a clipPath: everything out of this area won't be drawn.
+  var tsclip = tsSVG.append("defs").append("svg:clipPath")
+      .attr("id", "tsclip")
+      .append("svg:rect")
+      .attr("width", width )
+      .attr("height", height )
+      .attr("x", 0)
+      .attr("y", 0);
+
+  // Create the area variable: where both the area and the brush take place
+  brushArea = tsSVG.append("g")
+    .attr("clip-path", "url(#tsclip)");
+
+  tsSVG.append("g")
+    .attr("transform", "translate(0," + height + ")")
+    .attr("class", "ts-axis--x")
+    .call(xAxis);
+
+  tsSVG.append("g")
+    .attr("class", "ts-axis--y")
+    .call(yAxis);
+
+  // Add brushing
+  tsbrush = d3.brushX()                   // Add the brush feature using the d3.brush function
+      .extent( [ [0,0], [width,height] ] )  // initialise the brush area: start at 0,0 and finishes at width,height: it means I select the whole graph area
+      .on("brush", updateTSChart)// Each time the brush selection changes, trigger the 'updateChart' function
+      .on("end", sendTime);
+
+  // tsSVG.append("rect")
+  //     .attr("class", "zoom")
+  //     .attr("width", width)
+  //     .attr("height", height)
+  //     .style("cursor", "move")
+  //     .style("fill", "none")
+  //     .style("pointer-events", "all")
+  //     .call(tszoom);
+
+  // Add the area
+  brushArea.append("path")
+      .datum(tweetcounts)
+      .attr("class", "tsarea")  // I add the class myArea to be able to modify it later on.
+      .attr("fill", "#57068C")
+      .attr("fill-opacity", .3)
+      .attr("stroke", "#57068C")
+      .attr("stroke-width", 1)
+      .attr("d", areaGenerator);
+
+  // Add the brushing
+  brushArea
+    .append("g")
+      .attr("class", "tsbrush")
+      .call(tsbrush);
+
+  // create a tooltip
+  // tooltip = tsSVG.append("div")
+  //   .style("opacity", 0)
+  //   .attr("class", "tooltip")
+  //   .style("background-color", "white")
+  //   .style("border", "solid")
+  //   .style("border-width", "2px")
+  //   .style("border-radius", "5px")
+  //   .style("padding", "5px")
+
+  // tsSVG.append("g")
+  //   .selectAll("circle")
+  //   .data(tweetcounts)
+  //   .enter()
+  //   .append("circle")
+  //     .attr("cx", function (d) { return xScale(new Date(d.date)); } )
+  //     .attr("cy", function (d) { return yScale(d.count); } )
+  //     .attr("r", 2)
+  //     .style("fill", "#57068C");
+      // .style("stroke", "#FFFFFF");
+
+  var tszoom = d3.zoom()
+    .scaleExtent([1, Infinity])
+    .translateExtent([[0, 0], [width, height]])
+    .extent([[0, 0], [width, height]])
+    .on("zoom", zoomed)
+    .on("end", sendZoom);
+}
+
+function updateQuery(layer) {
+  var {
+    _southWest,
+    _northEast
+  } = layer._bounds;
+
+  // Put function call to the backend here based on the bounds
+  socket.send(JSON.stringify({
+    k: parseInt($('#k').val()),
+    userID: userId,
+    minLat: _southWest.lat.toFixed(4),
+    minLon: _southWest.lng.toFixed(4),
+    maxLat: _northEast.lat.toFixed(4),
+    maxLon: _northEast.lng.toFixed(4),
+    minTime: minTime,
+    maxTime: maxTime,
+  }));
+
+  console.log(JSON.stringify({
+    k: parseInt($('#k').val()),
+    userID: userId,
+    minLat: _southWest.lat.toFixed(4),
+    minLon: _southWest.lng.toFixed(4),
+    maxLat: _northEast.lat.toFixed(4),
+    maxLon: _northEast.lng.toFixed(4),
+    minTime: minTime,
+    maxTime: maxTime,
+  }))
+
+  moveSVG(layer, _northEast, _southWest);
+}
+
+function wordCloud(selector) {
+  // draw the word cloud
+  function drawCloud(words) {
+    var cloud = selector.selectAll("text").data(words);
+
+    // Entering the words
+    cloud.enter()
+      .append("text")
+      .text(function(d) {
+        return d.text;
+      })
+      .style("font-size", function(d) {
+        return d.size + "px";
+      })
+      .style("font-family", "Exo")
+      .style("fill", '#57068C')
+      .style("stroke-width", '0.5')
+      .style("stroke", '#FFFFFF')
+      .attr("text-anchor", "middle")
+      .attr("transform", function(d) {
+        return "translate(" + [d.x, d.y] + ")rotate(" + d.rotate + ")";
+      });
+
+    cloud
+      .transition()
+      .duration(1000)
+      .text(function(d) {
+        return d.text;
+      })
+      .style("font-size", function(d) {
+        return d.size + "px";
+      })
+      .attr("transform", function(d) {
+        return "translate(" + [d.x, d.y] + ")rotate(" + d.rotate + ")";
+      })
+      .style("fill-opacity", 1);
+
+    //Exiting words
+    cloud.exit()
+      .transition()
+      .duration(200)
+      .style('fill-opacity', 1e-6)
+      .attr('font-size', 1)
+      .remove();
+  }
+
+  //Use the module pattern to encapsulate the visualisation code. We'll
+  // expose only the parts that need to be public.
+  return {
+    //Recompute the word cloud for a new set of words. This method will
+    // asycnhronously call draw when the layout has been computed.
+    //The outside world will need to call this function, so make it part
+    // of the wordCloud return value.
+    update: function(words, size) {
+      var fontScale = d3.scaleLinear().domain(d3.extent(words, function(d) {
+        return d.value;
+      })).range([18, maxSize]);
+      // var color = d3.scaleLinear()
+      //             .domain(d3.extent(words, function(d) { return d.value; }))
+      //             .range(["#ddd", "#ccc", "#bbb", "#aaa", "#999", "#888", "#777", "#666", "#555", "#444", "#333", "#222"]);
+
+      d3.layout.cloud()
+        .size(size)
+        .stop()
+        .words(words)
+        .text(function(d) {
+          return d.text;
+        })
+        .padding(1)
+        .rotate(0)
+        .font("Exo")
+        .timeInterval(1)
+        .fontSize(function(d) {
+          return fontScale(d.value);
+        })
+        .spiral("rectangular")
+        .on("end", drawCloud)
+        .start();
+    }
+  }
+}
+
+function initChart() {
+  // Initialize size of the chart
+  var chart_width = $("#chart").width(),
+    chart_height = $("#chart").height();
+  var main_margin = { top: 10, right: 10, bottom: 30, left: 60 },
+      main_width = (0.85 * chart_width) - main_margin.left - main_margin.right,
+      main_height = chart_height - main_margin.top - main_margin.bottom,
+      mini_margin = { top: 10, right: 10, bottom: 30, left: 5 },
+      mini_height = chart_height - mini_margin.top - mini_margin.bottom;
+  mini_width = (0.15 * chart_width) - mini_margin.left - mini_margin.right;
+
+  //Added only for the mouse wheel
+  var zoomer = d3.zoom()
+    .on("zoom", null);
+
+  // Initialize the scales
+  main_xScale = d3.scaleLinear().range([0, main_width]);
+  mini_xScale = d3.scaleLinear().range([0, mini_width]);
+
+  main_yScale = d3.scaleBand().range([0, main_height]).paddingInner(0.4).paddingOuter(0);
+  mini_yScale = d3.scaleBand().range([0, mini_height]).paddingInner(0.4).paddingOuter(0);
+
+  textScale = d3.scaleLinear()
+      .domain([5, 50])
+      .range([14, 6])
+      .clamp(true);
+
+  main_yZoom = d3.scaleLinear()
+      .range([0, main_height])
+      .domain([0, main_height]);
+
+  // Initialize the axis objects
+  main_xAxis = d3.axisBottom(main_xScale)
+      .ticks(4)
+      .tickSizeOuter(0);
+
+  main_yAxis = d3.axisLeft(main_yScale)
+      .tickSize(0)
+      .tickSizeOuter(0);
+
+  chartSVG = d3.select("#chart").append("svg")
+            .attr("width", chart_width)
+            .attr("height", chart_height)
+            .style("position", "relative")
+            .call(zoomer)
+            .on("wheel.zoom", scroll)
+
+  chartSVG.append("defs").append("clipPath")
+    .attr("id", "clip")
+    .append("rect")
+      .attr("x", -main_margin.left)
+      .attr("width", main_width + main_margin.left)
+      .attr("height", main_height);
+
+  var mainGroup = chartSVG.append("g")
+        .attr("class", "mainGroupWrapper")
+        .attr("transform", "translate(" + main_margin.left + "," + main_margin.top + ")")
+        .append("g")
+        .attr("clip-path", "url(#clip)")
+        .style("clip-path", "url(#clip)")
+        .attr("class", "mainGroup");
+
+  var miniGroup = chartSVG.append("g")
+        .attr("class", "miniGroup")
+        .attr("transform", "translate(" + (main_margin.left + main_width + main_margin.right + mini_margin.left) + "," + mini_margin.top + ")");
+
+  d3.select(".mainGroupWrapper")
+      .append("g")
+      .attr("class", "x axis")
+      .attr("transform", "translate(" + 0 + "," + (main_height + 5) + ")");
+
+  //Add group for the y axis
+  mainGroup.append("g")
+      .attr("class", "y axis")
+      .attr("transform", "translate(-5,0)");
+
+  var brushGroup = chartSVG.append("g")
+      .attr("class", "brushGroup")
+      .attr("transform", "translate(" + (main_margin.left + main_width + main_margin.right + mini_margin.left) + "," + mini_margin.top + ")");
+
+  brush = d3.brushY()
+    .extent([[0,0], [mini_width, mini_height]])
+    .handleSize(2)
+    .on("brush", brushmove);
+
+  //Set up the visual part of the brush
+  gBrush = d3.select(".brushGroup").append("g")
+    .attr("class", "brush")
+    .call(brush)
+    .call(function(g) {
+      g.select(".overlay")
+        .datum({type: "selection"})
+        .on("mousedown touchstart", brushcenter)
+    });
+
+  handle = gBrush.selectAll(".handle--custom")
+    .data([{type: "n"}, {type: "s"}])
+    .enter().append("path")
+      .attr("class", "handle--custom")
+      .attr("cursor", "ns-resize")
+      .attr("d", d3.symbol().type(d3.symbolTriangle).size(20));
+}
+
+function updateChart(data) {
+  // Update the scales
+  main_xScale.domain([0, d3.max(data, function(d) { return d.value; })]);
+  mini_xScale.domain([0, d3.max(data, function(d) { return d.value; })]);
+  main_yScale.domain(data.map(function(d) { return d.text; }));
+  mini_yScale.domain(data.map(function(d) { return d.text; }));
+
+  d3.select(".mainGroup")
+    .select(".y.axis")
+    .transition().duration(50)
+    .call(main_yAxis);
+
+  //Update the x axis of the big chart
+  d3.select(".mainGroupWrapper")
+    .select(".x.axis")
+    .transition().duration(50)
+    .call(main_xAxis);
+
+  var mainBar = d3.select(".mainGroup").selectAll(".bar")
+    .data(data);
+
+  // Update
+  mainBar.attr("y", function(d, i) { return main_yScale(d.text); })
+    .attr("height", main_yScale.bandwidth())
+    .attr("x", 0)
+    .transition().duration(50)
+    .attr("width", function(d) { return main_xScale(d.value); });
+
+  // Enter
+  mainBar.enter().append("rect")
+    .attr("class", "bar")
+    .style("fill", "#57068C")
+    .attr("y", function(d, i) { return main_yScale(d.text); })
+    .attr("height", main_yScale.bandwidth())
+    .attr("x", 0)
+    .transition().duration(50)
+    .attr("width", function(d) { return main_xScale(d.value); });
+
+  mainBar.exit()
+    .remove();
+
+  var miniBar = d3.select(".miniGroup").selectAll(".bar")
+    .data(data);
+
+  // Update
+  miniBar.attr("width", function(d) { return mini_xScale(d.value); })
+    .attr("y", function(d, i) { return mini_yScale(d.text); })
+    .attr("height", mini_yScale.bandwidth());
+
+  // Enter
+  miniBar.enter().append("rect")
+    .attr("class", "bar")
+    .attr("x", 0)
+    .attr("width", function(d) { return mini_xScale(d.value); })
+    .attr("y", function(d, i) { return mini_yScale(d.text); })
+    .attr("height", mini_yScale.bandwidth())
+    .style("fill", "#57068C");
+
+  // Exit
+  miniBar.exit()
+    .remove();
+
+  // Start the brush
+  var brushExtent = Math.max( 1, Math.min( 30, Math.round(data.length*0.5) ) );
+  gBrush.call(brush.move, [mini_yScale(wordcloud[0].text), mini_yScale(wordcloud[brushExtent].text)]);
+}
+
+function brushmove() {
+  if (d3.event.sourceEvent && d3.event.sourceEvent.type === "zoom") return; // ignore brush-by-zoom
+  var s = d3.event.selection || mini_yScale.range();
+
+  var selected = wordcloud.filter(function(d) {
+      var y = mini_yScale(d.text);
+
+      // check if the start of the brush is before the band
+      // and if the end of the brush is after the end of the band
+      return (s[0] - mini_yScale.bandwidth() + 1e-2 <= y) && (s[1] - 1e-2 >= y);
+  });
+
+  d3.select(".miniGroup").selectAll('.bar')
+    .style("fill", function(d, i) {
+      return selected.map(function(d) { return d.text; }).indexOf(d.text) > -1 ? "#57068C" : "#e0e0e0";
+    });
+
+  //Update the label size
+  d3.selectAll(".y.axis text")
+    .style("font-size", textScale(selected.length));
+
+  //Reset the part that is visible on the big chart
+  var originalRange = main_yZoom.range();
+  main_yZoom.domain( s );
+
+  //Update the domain of the x & y scale of the big bar chart
+  main_yScale.domain(wordcloud.map(function(d) { return d.text; }));
+  main_yScale.range( [ main_yZoom(originalRange[0]), main_yZoom(originalRange[1]) ]).padding(0.25);
+
+  //Update the y axis of the big chart
+  d3.select(".mainGroup")
+    .select(".y.axis")
+    .call(main_yAxis);
+
+  //Find the new max of the bars to update the x scale
+  // var newMaxXScale = d3.max(wordcloud, function(d) { return selected.map(function(d) { return d.text; }).indexOf(d.text) > -1 ? d.value : 0; });
+  // main_xScale.domain([0, newMaxXScale]);
+  // //Update the x axis of the big chart
+  // d3.select(".mainGroupWrapper")
+  //   .select(".x.axis")
+  //   .transition().duration(50)
+  //   .call(main_xAxis);
+
+  handle.attr("fill", "#7A7A7A")
+    .attr("fill-opacity", "1")
+    .attr("stroke", "#7A7A7A")
+    .attr("stroke-width", "2px")
+    .attr("transform", function(d, i) {
+      var transform = "translate(" + [ mini_width/2, s[i]-3] + ")"
+      if (i) {
+        transform = "translate(" + [ mini_width/2, s[i]+3] + ") rotate(180)";
+      }
+      return transform;
+    });
+
+  // d3.select(this).call(brushHandle, s);
+
+  updateMainChart();
+}
+
+function updateMainChart() {
+  /////////////////////////////////////////////////////////////
+  ////////// Update the bars of the main bar chart ////////////
+  /////////////////////////////////////////////////////////////
+  //DATA JOIN
+  var bar = d3.select(".mainGroup").selectAll(".bar")
+      .data(wordcloud);
+  //UPDATE
+  bar
+    .attr("y", function(d,i) { return main_yScale(d.text); })
+    .attr("height", main_yScale.bandwidth())
+    .attr("x", 0)
+    .transition().duration(50)
+    .attr("width", function(d) { return main_xScale(d.value); });
+  //ENTER
+  bar.enter().append("rect")
+    .attr("class", "bar")
+    .style("fill", "#57068C")
+    .attr("y", function(d,i) { return main_yScale(d.text); })
+    .attr("height", main_yScale.bandwidth())
+    .attr("x", 0)
+    .transition().duration(50)
+    .attr("width", function(d) { return main_xScale(d.value); });
+  //EXIT
+  bar.exit()
+    .remove();
+}//updateMainChart
+
+//Based on http://bl.ocks.org/mbostock/6498000
+//What to do when the user clicks on another location along the brushable bar chart
+function brushcenter() {
+  const [Y0, Y1] = mini_yScale.range();
+  const [cx, cy] = d3.mouse(this);
+  const dy = mini_yScale(wordcloud[5].text) - mini_yScale(wordcloud[0].text);
+  const [y0, y1] = [cy - dy / 2, cy + dy / 2];
+
+  d3.event.stopPropagation();
+
+  d3.select(this.parentNode)
+    .call(brush.move, y1 > Y1 ? [Y1 - dy, Y1]
+        : y0 < Y0 ? [Y0, Y0 + dy]
+        : [y0, y1]);
+}//brushcenter
+
+function scroll() {
+  //Mouse scroll on the mini chart
+  var [y0, y1] = d3.brushSelection(gBrush.node()),
+    size = y1 - y0,
+    [Y0, Y1] = mini_yScale.range(),
+    dy = d3.event.deltaY,
+    topSection;
+
+  if ( y0 - dy < Y0 ) { topSection = Y0; }
+  else if ( y1 - dy > Y1 ) { topSection = Y1 - size; }
+  else { topSection = y0 - dy; }
+
+  gBrush.call(brush.move, [topSection, topSection + size]);
+}//scroll
+
+function updateTSChart() {
+  // What are the selected boundaries?
+  extent = d3.event.selection
+
+  // Get the datetime based on the selection
+  if (extent) {
+    minTime = xScale.invert(extent[0]);
+    maxTime = xScale.invert(extent[1]);
+
+    d3.select("#minTime").html(moment(minTime).format('MMM DD, YYYY HH:mm'));
+    d3.select("#maxTime").html(moment(maxTime).format('MMM DD, YYYY HH:mm'));
+    // xScale.domain([ xScale.invert(extent[0]), xScale.invert(extent[1]) ])
+    // brushArea.select(".tsbrush").call(tsbrush.move, null) // This remove the grey brush area as soon as the selection has been done
+  }
+
+  // // If no selection, back to initial coordinate. Otherwise, update X axis domain
+  // if(!extent){
+  //   if (!idleTimeout) return idleTimeout = setTimeout(idled, 350); // This allows to wait a little bit
+  //   xScale.domain([ 4,8])
+  // }else{
+  //   xScale.domain([ xScale.invert(extent[0]), xScale.invert(extent[1]) ])
+  //   brushArea.select(".tsbrush").call(tsbrush.move, null) // This remove the grey brush area as soon as the selection has been done
+  // }
+  //
+  // // Update axis and area position
+  // xAxis.transition().duration(1000).call(d3.axisBottom(xScale))
+  // brushArea
+  //   .select('.tsarea')
+  //   .transition()
+  //   .duration(1000)
+  //   .attr("d", areaGenerator)
+}
+
+function sendTime() {
+  if (d3.event.sourceEvent && d3.event.sourceEvent.type === "zoom") return; // ignore zoom-by-brush
+  // What are the selected boundaries?
+  extent = d3.event.selection
+
+  // Get the datetime based on the selection
+  if (extent) {
+    minTime = xScale.invert(extent[0]);
+    maxTime = xScale.invert(extent[1]);
+  }
+
+  sendQuery();
+}
+
+function zoomed() {
+  if (d3.event.sourceEvent && d3.event.sourceEvent.type === "brush") return; // ignore zoom-by-brush
+  var t = d3.event.transform;
+
+  var updatedScale = t.rescaleX(xScale);
+  xAxis.scale(updatedScale);
+  tsSVG.select(".ts-axis--x").call(xAxis);
+
+  brushArea.select(".tsarea").attr("d", areaGenerator.x(function(d) { return updatedScale(new Date(d.date))}));
+}
+
+function sendZoom() {
+  if (d3.event.sourceEvent && d3.event.sourceEvent.type === "brush") return; // ignore zoom-by-brush
+  var t = d3.event.transform;
+
+  var updatedScale = t.rescaleX(xScale);
+  var domain = updatedScale.domain();
+  minTime = domain[0];
+  maxTime = domain[1];
+
+  sendQuery();
+}
+
+function sendQuery() {
+  drawnItems.eachLayer(function(layer) {
+    updateQuery(layer);
+  });
+}

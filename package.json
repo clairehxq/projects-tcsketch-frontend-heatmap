@@ -1,0 +1,27 @@
+{
+  "name": "projects-tcsketch-frontend",
+  "version": "1.0.0",
+  "description": "### Dependencies: 1. Leaflet.js 2. d3.js 3. [d3-cloud](https://github.com/jasondavies/d3-cloud)",
+  "main": "app.js",
+  "scripts": {
+    "dev": "nodemon app.js",
+    "start": "node app.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bdilab/projects-tcsketch-frontend.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/bdilab/projects-tcsketch-frontend/issues"
+  },
+  "homepage": "https://github.com/bdilab/projects-tcsketch-frontend#readme",
+  "dependencies": {
+    "d3-time": "^3.1.0",
+    "express": "^4.17.1"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.2"
+  }
+}

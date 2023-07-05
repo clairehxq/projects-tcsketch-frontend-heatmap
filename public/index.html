@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Access-Control-Allow-Origin" content="*">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>tcsketch</title>
+
+  <link href="https://fonts.googleapis.com/css?family=Exo:900|Roboto&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css"
+  integrity="sha512-xwE/Az9zrjBIphAcBb3F6JVqxf46+CDLwfLMHloNu6KEQCAWi6HcDUbeOfBIptF7tcCzusKFjFw2yuvEpDL9wQ=="
+  crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.6.0/dist/leaflet.js"
+  integrity="sha512-gZwIG9x3wUXg2hdXF6+rVkLF/0Vi9U8D2Ntg4Ga5I5BZpVkVxlJWbSQtXPSiUTtC0TjtGOmxa1AJPuV0CPthew=="
+  crossorigin=""></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <script src="http://code.jquery.com/jquery-2.0.3.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.24.0/moment.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/5.11.0/d3.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3-cloud/1.2.5/d3.layout.cloud.min.js"></script>
+  <link rel="stylesheet" href="main.css" />
+  <script type="text/javascript" src="nyc311_count_by_day.js"></script>
+  <script type="text/javascript" src="delay.js"></script>
+
+<script src='https://api.mapbox.com/mapbox-gl-js/v2.12.0/mapbox-gl.js'></script>
+<link href='https://api.mapbox.com/mapbox-gl-js/v2.12.0/mapbox-gl.css' rel='stylesheet' />
+
+</head>
+<body>
+  <div class="container-fluid main">
+    <!-- <div class="row">
+      <div class="col-12">
+        <h3>TC Sketch</h3>
+      </div>
+    </div> -->
+    <div class="row">
+      <div class="col-sm-12">
+        <form>
+            <div class="form-group row">
+              <div class="col-sm-1 form-label">
+                <label for="k"><strong>Tags</strong></label>
+              </div>
+              <div class="col-sm-1">
+                <input type="number" class="form-control form-control-sm" id="k" placeholder="k" onchange="sendQuery()">
+              </div>
+              <div class="col-sm-1">
+                <label for="minTime"><strong>Start Date: </strong></label>
+              </div>
+              <div class="col-sm-1">
+                <label id="minTime"></label>
+              </div>
+              <div class="col-sm-1">
+                <label for="maxTime"><strong>End Date: </strong></label>
+              </div>
+              <div class="col-sm-1">
+                <label id="maxTime"></label>
+              </div>
+
+              <div class="col-sm-1 form-label">
+                <label for="keyword"><strong>Keyword</strong></label>
+              </div>
+              <div class="col-sm-1">
+                <input type="string" class="form-control form-control-sm" id="keyword" placeholder="keyword" onchange="sendQuery()">
+              </div>
+
+
+              <div class="col-sm-1 form-label">
+                <label for="timeRes"><strong>Time Resolution</strong></label>
+              </div>
+              <div class="col-sm-1">
+                <select type="string" class="form-control form-control-sm" id="timeResolution" placeholder="day" onchange="sendQuery()">
+                  <option value="hour">Hour</option>
+                  <option value="day">Day</option>
+                  <option value="week">Week</option>
+                  <option value="month">Month</option>
+                </select>
+              </div>
+            </div>
+
+
+        </form>
+      </div>
+      <!-- <div class="col-sm-6">
+        <form id="filter">
+          <div class="form-group row">
+            <div class="col-sm-2">
+              <label for="minDate">Start Date</label>
+            </div>
+            <div class="col-sm-4">
+              <input type="date" class="form-control form-control-sm" id="minDate" placeholder="Minimum Date" onchange="sendQuery()">
+            </div>
+          </div>
+          <div class="form-group row">
+            <div class="col-sm-2">
+              <label for="maxDate">End Date</label>
+            </div>
+            <div class="col-sm-4">
+              <input type="date" class="form-control form-control-sm" id="maxDate" placeholder="Maximum Date" onchange="sendQuery()">
+            </div>
+          </div>
+        </form>
+      </div> -->
+  </div>
+  <div id="ts">
+  </div>
+  <div class="divider"></div>
+
+  <div id="canvas" class="container-fluid">
+    <div id="progress"></div>
+    <div class="row">
+      <div class="col-8" id="map"></div>
+      <div class="col-4" id="chart"></div>
+
+    </div>
+  </div>
+  <script type="text/javascript" src="main.js"></script>
+</body>
+</html>
