@@ -20,3 +20,4 @@
 1. https://gist.github.com/azza-bazoo/9381206
 2. http://bl.ocks.org/joews/9697914
 3. https://medium.com/front-end-weekly/websocket-and-data-visualization-be3613c880db
+# tcsketch frontend w heatmap
